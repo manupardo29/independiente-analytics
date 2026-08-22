@@ -154,6 +154,9 @@ def calcular_metricas_jugador(jugador):
 
     goles = jugador["goals"]
     asistencias = jugador["assists"]
+    pases = jugador["passes"]
+    faltas = jugador.get("fouls") or {}
+    penalty = jugador.get("penalty") or {}
 
     contribuciones_gol = (
         (goles or 0)
@@ -163,37 +166,47 @@ def calcular_metricas_jugador(jugador):
     return {
         "id": jugador["id"],
         "name": jugador["name"],
+        "photo": jugador.get("photo"),
         "position": jugador["position"],
         "number": jugador["number"],
         "minutes": jugador["minutes"],
         "rating": jugador["rating"],
+        "substitute": jugador.get("substitute"),
 
         "goals": goles,
         "assists": asistencias,
         "goal_contributions": contribuciones_gol,
+        "saves": jugador.get("saves"),
+        "goals_conceded": jugador.get("goals_conceded"),
+        "penalty_saved": penalty.get("saved"),
 
+        "shots_total": tiros["total"],
         "shots_on_target": tiros["on_target"],
 
-        "key_passes": (
-            jugador["passes"]["key"]
-        ),
-
-        "pass_accuracy_pct": (
-            jugador["passes"]["accuracy_pct"]
-        ),
+        "key_passes": pases["key"],
+        "passes_total": pases["total"],
+        "passes_accurate": pases["accurate"],
+        "pass_accuracy_pct": pases["accuracy_pct"],
 
         "tackles": tackles["total"],
+        "blocks": tackles.get("blocks"),
         "interceptions": tackles["interceptions"],
 
+        "duels_won": duelos["won"],
+        "duels_total": duelos["total"],
         "duel_win_pct": calcular_porcentaje(
             duelos["won"],
             duelos["total"]
         ),
 
+        "dribbles_successful": regates["successful"],
+        "dribbles_attempted": regates["attempted"],
         "dribble_success_pct": calcular_porcentaje(
             regates["successful"],
             regates["attempted"]
         ),
+
+        "fouls_drawn": faltas.get("drawn"),
     }
 
 

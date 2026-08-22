@@ -27,7 +27,10 @@ from src.theme import (
 )
 
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from PIL import Image
+from PIL import Image, ImageDraw
+
+from src.player_highlights import construir_destacados
+from src.player_photos import obtener_foto_jugador
 
 INDEPENDIENTE_ID = 453
 
@@ -1509,13 +1512,6 @@ def crear_xi_ratings(
 
     return ruta
 
-POSICION_LABEL = {
-    "G": "ARQUERO",
-    "D": "DEFENSOR",
-    "M": "MEDIOCAMPISTA",
-    "F": "DELANTERO",
-}
-
 def obtener_lado_destacado(partido):
     home = partido["teams"]["home"]
     away = partido["teams"]["away"]
@@ -1529,134 +1525,156 @@ def obtener_lado_destacado(partido):
     # Fallback para fixtures de desarrollo
     return "home"
 
-def seleccionar_mejores_jugadores(
-    jugadores_metricas,
-    cantidad=3
-):
-    con_rating = [
-        jugador
-        for jugador in jugadores_metricas
-        if jugador["rating"] is not None
-    ]
+FOTO_PIXELES = 108
+FOTO_TAMANO_PREP = 216
 
-    ordenados = sorted(
-        con_rating,
-        key=lambda jugador: jugador["rating"],
-        reverse=True
+
+def _color_hex_a_rgba(hex_color, alpha=255):
+    valor = hex_color.lstrip("#")
+
+    return (
+        int(valor[0:2], 16),
+        int(valor[2:4], 16),
+        int(valor[4:6], 16),
+        alpha,
     )
 
-    return ordenados[:cantidad]
 
-def elegir_stats_destacadas(jugador):
+def preparar_foto_circular(ruta, tamano=FOTO_TAMANO_PREP):
+    imagen = Image.open(ruta).convert("RGBA")
+
+    ancho, alto = imagen.size
+    lado = min(ancho, alto)
+    left = (ancho - lado) // 2
+    top = (alto - lado) // 2
+
+    imagen = imagen.crop(
+        (left, top, left + lado, top + lado)
+    )
+    imagen = imagen.resize(
+        (tamano, tamano),
+        Image.Resampling.LANCZOS
+    )
+
+    mascara = Image.new("L", (tamano, tamano), 0)
+    ImageDraw.Draw(mascara).ellipse(
+        (1, 1, tamano - 2, tamano - 2),
+        fill=255
+    )
+
+    # Fondo PANEL para que una foto con transparencia
+    # no "rompa" el circulo sobre el watermark.
+    fondo = Image.new(
+        "RGBA",
+        (tamano, tamano),
+        _color_hex_a_rgba(PANEL)
+    )
+    fondo.paste(imagen, (0, 0), imagen)
+    fondo.putalpha(mascara)
+
+    return fondo
+
+
+def _ancho_texto_datos(ax, artista_texto):
     """
-    Elige que 2 stats mostrar en la tarjeta de cada jugador.
+    Ancho del texto ya dibujado, en coordenadas del ax.
 
-    Regla: si el jugador convirtio gol o dio asistencia, ESO
-    se muestra siempre primero, sin importar su posicion (un
-    gol de un defensor es la noticia, no un dato secundario).
-    Si no, se usa una plantilla por posicion.
-
-    Por que hace falta esta excepcion: el campo "position" que
-    da API-Football es una clasificacion generica del jugador,
-    no necesariamente el rol que cumplio ESTE partido puntual.
-    Sin este override, un mediocampista que jugo de extremo y
-    convirtio un gol (ej: Vombergar en el fixture de desarrollo,
-    position="M") mostraria "pases clave: 1" como dato principal
-    en vez del gol que lo hizo figura del partido.
+    Evita reservar una columna fija para '51/60' cuando
+    el valor es '1' y la etiqueta queda lejos del numero.
     """
-    goles = jugador["goals"] or 0
-    asistencias = jugador["assists"] or 0
-    posicion = jugador.get("position")
+    try:
+        renderer = ax.figure.canvas.get_renderer()
 
-    if goles + asistencias > 0:
-        stat_1 = (
-            "GOLES + ASIST.",
-            f"{goles}+{asistencias}"
+        if renderer is None:
+            ax.figure.canvas.draw()
+            renderer = ax.figure.canvas.get_renderer()
+
+        caja = artista_texto.get_window_extent(renderer=renderer)
+        caja_datos = caja.transformed(
+            ax.transData.inverted()
         )
 
-    elif posicion == "D":
-        stat_1 = (
-            "DUELOS GANADOS",
-            formatear_valor(
-                jugador["duel_win_pct"],
-                "pct"
+        return caja_datos.width
+
+    except Exception:
+        texto = artista_texto.get_text()
+        return 0.032 * max(len(texto), 1)
+
+
+def _fontsize_nombre_destacado(nombre):
+    largo = len(nombre or "")
+
+    if largo > 20:
+        return 15
+
+    if largo > 16:
+        return 17
+
+    return 19
+
+
+def dibujar_foto_o_dorsal(ax, x, y, destacado):
+    """
+    Foto circular recortada, o el dorsal si no hay foto.
+
+    scatter() para el anillo: un Circle() en este ax se
+    achata porque X e Y no tienen la misma escala (el
+    mismo motivo que en la placa anterior).
+    """
+    ruta_foto = obtener_foto_jugador(
+        destacado.get("id"),
+        destacado.get("photo"),
+    )
+
+    ax.scatter(
+        x,
+        y,
+        s=2350,
+        color=TRACK,
+        edgecolors=ACCENT,
+        linewidth=2.2,
+        zorder=2,
+    )
+
+    if ruta_foto:
+        try:
+            foto = preparar_foto_circular(ruta_foto)
+            zoom = FOTO_PIXELES / max(foto.size)
+
+            caja = AnnotationBbox(
+                OffsetImage(foto, zoom=zoom),
+                (x, y),
+                frameon=False,
+                pad=0,
+                zorder=3,
             )
-        )
-
-    elif posicion == "M":
-        stat_1 = (
-            "PASES CLAVE",
-            formatear_valor(
-                jugador["key_passes"],
-                "int"
+            ax.add_artist(caja)
+            return
+        except Exception as error:
+            print(
+                f"[visualizations] No se pudo usar la "
+                f"foto de {destacado.get('name')}: {error}"
             )
-        )
 
-    elif posicion == "F":
-        stat_1 = (
-            "TIROS AL ARCO",
-            formatear_valor(
-                jugador["shots_on_target"],
-                "int"
-            )
-        )
+    ax.text(
+        x,
+        y,
+        str(destacado["number"])
+        if destacado.get("number") is not None
+        else "-",
+        ha="center",
+        va="center",
+        fontsize=16,
+        fontweight="bold",
+        color=TEXT,
+        zorder=3,
+    )
 
-    else:
-        stat_1 = (
-            "MINUTOS",
-            formatear_valor(
-                jugador["minutes"],
-                "int"
-            )
-        )
 
-    if posicion == "D":
-        stat_2 = (
-            "INTERCEPCIONES",
-            formatear_valor(
-                jugador["interceptions"],
-                "int"
-            )
-        )
-
-    elif posicion == "G":
-        stat_2 = (
-            "PRECISION PASE",
-            formatear_valor(
-                jugador["pass_accuracy_pct"],
-                "pct"
-            )
-        )
-
-    else:
-        stat_2 = (
-            "DUELOS GANADOS",
-            formatear_valor(
-                jugador["duel_win_pct"],
-                "pct"
-            )
-        )
-
-    return stat_1, stat_2
-
-def dibujar_tarjeta_jugador(
-    ax,
-    y,
-    alto,
-    jugador,
-    apellidos_duplicados,
-    es_figura,
-):
+def dibujar_tarjeta_destacado(ax, y, alto, destacado):
     ancho = 2.2
-
-    # Grilla de 2 filas compartida por TODO el contenido de la
-    # tarjeta (nombre, stats). Antes el bloque nombre/posicion
-    # y el bloque de stats se centraban cada uno por su lado,
-    # sin compartir ningun eje horizontal - de ahi la sensacion
-    # de que "no estaba alineado". Ahora todo lo que va en la
-    # fila de arriba usa FILA_1, todo lo de abajo usa FILA_2.
-    FILA_1 = y + 0.14
-    FILA_2 = y - 0.14
+    x_foto = -ancho / 2 + 0.36
+    x_texto = x_foto + 0.38
 
     tarjeta = FancyBboxPatch(
         (
@@ -1674,92 +1692,63 @@ def dibujar_tarjeta_jugador(
         zorder=1,
     )
 
-    ax.add_patch(
-        tarjeta
-    )
+    ax.add_patch(tarjeta)
 
-    # Dorsal. OJO: antes esto era un Circle() en coordenadas
-    # de DATOS, pero este ax tiene una escala X muy distinta
-    # a la escala Y (389.5px/unidad en X vs 157.1px/unidad en
-    # Y - un factor de ~2.5x), asi que un Circle() de radio
-    # fijo se dibujaba como un ovalo achatado, no un circulo.
-    # scatter() dimensiona "s" en puntos de pantalla, no en
-    # unidades de datos - por eso sale circular sin importar
-    # la distorsion de aspecto del eje (mismo truco que ya usa
-    # pitch.scatter en la Placa 3).
-    centro_x = -ancho / 2 + 0.32
-
-    ax.scatter(
-        centro_x,
+    dibujar_foto_o_dorsal(
+        ax,
+        x_foto,
         y,
-        s=1500,
-        color=TRACK,
-        edgecolors=ACCENT,
-        linewidth=2.2,
-        zorder=2,
+        destacado
     )
+
+    nombre = destacado["display_name"]
+    minutos = destacado.get("minutes")
+    minutos_txt = (
+        f"{int(minutos)}'"
+        if minutos is not None
+        else ""
+    )
+
+    meta = destacado["position_label"]
+
+    if minutos_txt:
+        meta = f"{meta}  ·  {minutos_txt}"
 
     ax.text(
-        centro_x,
-        y,
-        str(jugador["number"])
-        if jugador["number"] is not None
-        else "-",
-        ha="center",
-        va="center",
-        fontsize=15,
-        fontweight="bold",
-        color=TEXT,
-        zorder=3,
-    )
-
-    # Nombre y posicion - fila 1 / fila 2
-    nombre = acortar_nombre(
-        jugador["name"],
-        apellidos_duplicados
-    )
-
-    etiqueta_posicion = POSICION_LABEL.get(
-        jugador.get("position"),
-        "N/D"
-    )
-
-    ax.text(
-        centro_x + 0.32,
-        FILA_1,
+        x_texto,
+        y + 0.48,
         nombre,
         ha="left",
         va="center",
-        fontsize=19,
+        fontsize=_fontsize_nombre_destacado(nombre),
         fontweight="bold",
         color=TEXT,
         zorder=2,
     )
 
     ax.text(
-        centro_x + 0.32,
-        FILA_2,
-        etiqueta_posicion,
+        x_texto,
+        y + 0.26,
+        meta,
         ha="left",
         va="center",
-        fontsize=11,
+        fontsize=12,
         fontweight="bold",
         color=MUTED_TEXT,
         zorder=2,
     )
 
-    # Rating, arriba a la derecha de la tarjeta
     color_rating, color_texto_rating = (
         obtener_estilo_rating(
-            jugador["rating"]
+            destacado["rating"]
         )
     )
 
     ax.add_patch(
         FancyBboxPatch(
             (
-                ancho / 2 - 0.48,
-                y + alto / 2 - 0.34
+                ancho / 2 - 0.46,
+                y + alto / 2 - 0.36
             ),
             0.34,
             0.24,
@@ -1774,10 +1763,10 @@ def dibujar_tarjeta_jugador(
     )
 
     ax.text(
-        ancho / 2 - 0.31,
-        y + alto / 2 - 0.22,
+        ancho / 2 - 0.29,
+        y + alto / 2 - 0.24,
         formatear_decimal(
-            jugador["rating"],
+            destacado["rating"],
             1
         ),
         ha="center",
@@ -1788,10 +1777,10 @@ def dibujar_tarjeta_jugador(
         zorder=3,
     )
 
-    if es_figura:
+    if destacado.get("es_figura"):
         ax.text(
-            ancho / 2 - 0.02,
-            y + alto / 2 - 0.34 - 0.16,
+            ancho / 2 - 0.12,
+            y + alto / 2 - 0.50,
             "FIGURA",
             ha="right",
             va="center",
@@ -1801,44 +1790,34 @@ def dibujar_tarjeta_jugador(
             zorder=3,
         )
 
-    # Las 2 stats destacadas - mismas filas 1/2 que el nombre
-    # y la posicion, para que todo quede sobre el mismo eje.
-    stat_1, stat_2 = elegir_stats_destacadas(
-        jugador
-    )
+    stats = destacado.get("stats") or []
+    y_stats = [0.02, -0.22, -0.46]
 
-    # x de cada columna de stat calculado contra el PEOR CASO
-    # de ancho de label en cada una ("GOLES + ASIST." /
-    # "DUELOS GANADOS" en la primera, "INTERCEPCIONES" /
-    # "PRECISION PASE" en la segunda, todos 14-15 caracteres)
-    # mas un margen de 0.15 unidades. El factor de ancho por
-    # caracter (0.70) esta calibrado contra el ancho medido en
-    # pixeles reales, no estimado a ojo - la primera version
-    # de este calculo uso un factor mas bajo (0.55) y quedo
-    # corta, lo que provoco un choque entre columnas.
-    for (etiqueta, valor), x in zip(
-        [stat_1, stat_2],
-        [0.239, 0.774],
-    ):
-        ax.text(
-            x,
-            FILA_1,
-            valor,
-            ha="center",
+    for stat, y_stat in zip(stats, y_stats):
+        valor = ax.text(
+            x_texto,
+            y + y_stat,
+            stat["value"],
+            ha="left",
             va="center",
-            fontsize=20,
+            fontsize=16,
             fontweight="bold",
             color=ACCENT,
             zorder=2,
         )
 
+        x_label = x_texto + _ancho_texto_datos(
+            ax,
+            valor
+        ) + 0.055
+
         ax.text(
-            x,
-            FILA_2,
-            etiqueta,
-            ha="center",
+            x_label,
+            y + y_stat,
+            stat["label"],
+            ha="left",
             va="center",
-            fontsize=11,
+            fontsize=13,
             fontweight="bold",
             color=MUTED_TEXT,
             zorder=2,
@@ -1866,16 +1845,13 @@ def crear_rendimiento_individual(
         lado_destacado
     ]
 
-    mejores = seleccionar_mejores_jugadores(
+    destacados = construir_destacados(
+        equipo_destacado,
         jugadores_equipo
     )
 
-    if not mejores:
+    if not destacados:
         return None
-
-    apellidos_duplicados = calcular_apellidos_duplicados(
-        mejores
-    )
 
     score = partido["match"]["score"]
 
@@ -2006,7 +1982,7 @@ def crear_rendimiento_individual(
     ax.text(
         0,
         5.65,
-        "RENDIMIENTO INDIVIDUAL",
+        "RENDIMIENTOS DESTACADOS",
         ha="center",
         va="center",
         fontsize=19,
@@ -2024,21 +2000,23 @@ def crear_rendimiento_individual(
         color=MUTED_TEXT,
     )
 
-    alto_tarjeta = 1.43
-    gap = 0.3
+    alto_tarjeta = 1.52
+    gap = 0.16
 
-    y_inicial = 4.33
+    y_inicial = 4.30
 
-    for indice, jugador in enumerate(mejores):
+    # Hace falta un renderer para medir el ancho real
+    # de "1" vs "51/60" al pegar la etiqueta.
+    fig.canvas.draw()
+
+    for indice, destacado in enumerate(destacados):
         y = y_inicial - indice * (alto_tarjeta + gap)
 
-        dibujar_tarjeta_jugador(
+        dibujar_tarjeta_destacado(
             ax,
             y,
             alto_tarjeta,
-            jugador,
-            apellidos_duplicados,
-            es_figura=(indice == 0),
+            destacado,
         )
 
     agregar_marca_de_cuenta(fig)
