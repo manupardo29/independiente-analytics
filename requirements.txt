@@ -1,0 +1,10 @@
+# Version sin pinnear a proposito mientras el proyecto esta
+# en desarrollo activo. Antes de compartir el repo como
+# portfolio, correr `pip freeze > requirements.txt` para
+# dejar las versiones exactas con las que probaste todo.
+
+requests
+python-dotenv
+matplotlib
+mplsoccer
+Pillow

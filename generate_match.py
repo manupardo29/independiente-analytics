@@ -7,6 +7,7 @@ from src.validation import validar_partido
 from src.visualizations import (
     crear_comparacion_general,
     crear_perfil_ofensivo,
+    crear_rendimiento_individual,
     crear_xi_ratings,
 )
 
@@ -15,6 +16,43 @@ def mostrar_porcentaje(valor):
         return "N/D"
 
     return f"{valor}%"
+
+def intentar_generar_placa(
+    nombre,
+    funcion,
+    args
+):
+    """
+    Genera UNA placa sin arriesgar el resto del batch.
+
+    Si la funcion devuelve None (esa placa puntual no tiene
+    datos suficientes para este partido - por ejemplo, sin
+    alineacion no hay XI) o levanta una excepcion, se reporta
+    como omitida y seguimos con las demas. La idea es que el
+    programa genere todas las placas POSIBLES en cada corrida;
+    la curacion de cuales publicar (y en que posteo) queda de
+    tu lado, despues, mirando que se genero.
+    """
+    try:
+        resultado = funcion(*args)
+
+    except Exception as error:
+        print(
+            f"  [omitida] {nombre}: {error}"
+        )
+        return None
+
+    if resultado is None:
+        print(
+            f"  [omitida] {nombre}: "
+            f"datos insuficientes para este partido"
+        )
+        return None
+
+    print(
+        f"  [generada] {nombre} -> {resultado}"
+    )
+    return resultado
 
 def generar_partido(fixture_id):
     ruta_raw = (
@@ -88,20 +126,9 @@ def generar_partido(fixture_id):
         f"fixture_{fixture_id}_team_comparison.png"
     )
 
-    crear_comparacion_general(
-        partido,
-        ruta_figura
-    )
-
     ruta_ataque = (
         f"outputs/figures/"
         f"fixture_{fixture_id}_attack_profile.png"
-    )
-
-    crear_perfil_ofensivo(
-        partido,
-        metricas,
-        ruta_ataque
     )
 
     ruta_xi = (
@@ -109,10 +136,45 @@ def generar_partido(fixture_id):
         f"fixture_{fixture_id}_starting_xi.png"
     )
 
-    crear_xi_ratings(
-        partido,
-        ruta_xi
+    ruta_individual = (
+        f"outputs/figures/"
+        f"fixture_{fixture_id}_individual.png"
     )
+
+    placas = [
+        (
+            "Comparacion general",
+            crear_comparacion_general,
+            (partido, ruta_figura),
+        ),
+        (
+            "Ataque y calidad de ocasiones",
+            crear_perfil_ofensivo,
+            (partido, metricas, ruta_ataque),
+        ),
+        (
+            "XI inicial y ratings",
+            crear_xi_ratings,
+            (partido, ruta_xi),
+        ),
+        (
+            "Rendimiento individual",
+            crear_rendimiento_individual,
+            (partido, metricas, ruta_individual),
+        ),
+    ]
+
+    print()
+    print("Generando placas...")
+
+    rutas_generadas = {}
+
+    for nombre, funcion, args in placas:
+        rutas_generadas[nombre] = intentar_generar_placa(
+            nombre,
+            funcion,
+            args
+        )
 
     home = partido["teams"]["home"]
     away = partido["teams"]["away"]
@@ -250,20 +312,16 @@ def generar_partido(fixture_id):
         f"Partido normalizado guardado en: "
         f"{ruta_normalized}"
     )
-    print(
-        f"Grafico guardado en: "
-        f"{ruta_figura}"
-    )
 
-    print(
-        f"Grafico ofensivo guardado en: "
-        f"{ruta_ataque}"
-    )
+    print()
+    print("Resumen de placas:")
 
-    print(
-        f"Grafico XI guardado en: "
-        f"{ruta_xi}"
-    )
+    for nombre, ruta in rutas_generadas.items():
+        if ruta:
+            print(f"  OK  {nombre} -> {ruta}")
+        else:
+            print(f"  --  {nombre} (omitida)")
+
 
 
 if __name__ == "__main__":

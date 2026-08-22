@@ -149,6 +149,8 @@ def calcular_metricas_partido(partido):
 def calcular_metricas_jugador(jugador):
     duelos = jugador["duels"]
     regates = jugador["dribbles"]
+    tackles = jugador["tackles"]
+    tiros = jugador["shots"]
 
     goles = jugador["goals"]
     asistencias = jugador["assists"]
@@ -161,12 +163,27 @@ def calcular_metricas_jugador(jugador):
     return {
         "id": jugador["id"],
         "name": jugador["name"],
+        "position": jugador["position"],
+        "number": jugador["number"],
         "minutes": jugador["minutes"],
         "rating": jugador["rating"],
+
+        "goals": goles,
+        "assists": asistencias,
+        "goal_contributions": contribuciones_gol,
+
+        "shots_on_target": tiros["on_target"],
+
+        "key_passes": (
+            jugador["passes"]["key"]
+        ),
 
         "pass_accuracy_pct": (
             jugador["passes"]["accuracy_pct"]
         ),
+
+        "tackles": tackles["total"],
+        "interceptions": tackles["interceptions"],
 
         "duel_win_pct": calcular_porcentaje(
             duelos["won"],
@@ -177,8 +194,6 @@ def calcular_metricas_jugador(jugador):
             regates["successful"],
             regates["attempted"]
         ),
-
-        "goal_contributions": contribuciones_gol,
     }
 
 
