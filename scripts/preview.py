@@ -22,6 +22,7 @@ from src.storage import cargar_json
 from src.visualizations import (
     crear_comparacion_general,
     crear_perfil_ofensivo,
+    crear_rendimiento_individual,
     crear_xi_ratings,
 )
 
@@ -49,6 +50,12 @@ def preview(fixture_id):
     crear_xi_ratings(
         partido,
         f"outputs/figures/fixture_{fixture_id}_starting_xi.png",
+    )
+
+    crear_rendimiento_individual(
+        partido,
+        metricas,
+        f"outputs/figures/fixture_{fixture_id}_individual.png",
     )
 
     print(

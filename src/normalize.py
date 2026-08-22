@@ -131,6 +131,7 @@ def normalizar_jugador(jugador):
     dribbles = stats.get("dribbles", {})
     fouls = stats.get("fouls", {})
     cards = stats.get("cards", {})
+    penalty = stats.get("penalty", {})
 
     pases_totales = a_int(
         passes.get("total")
@@ -178,6 +179,19 @@ def normalizar_jugador(jugador):
 
         "assists": a_int(
             goals.get("assists")
+        ),
+
+        # API-Football los mete dentro de goals.*, no
+        # en un bloque aparte. Los guardamos en el
+        # esquema propio para que la placa de
+        # destacados pueda usarlos en arqueros sin
+        # volver a leer el JSON crudo.
+        "saves": a_int(
+            goals.get("saves")
+        ),
+
+        "goals_conceded": a_int(
+            goals.get("conceded")
         ),
 
         "passes": {
@@ -245,6 +259,24 @@ def normalizar_jugador(jugador):
 
             "red": a_int(
                 cards.get("red")
+            ),
+        },
+
+        "penalty": {
+            "won": a_int(
+                penalty.get("won")
+            ),
+
+            "scored": a_int(
+                penalty.get("scored")
+            ),
+
+            "missed": a_int(
+                penalty.get("missed")
+            ),
+
+            "saved": a_int(
+                penalty.get("saved")
             ),
         },
     }
