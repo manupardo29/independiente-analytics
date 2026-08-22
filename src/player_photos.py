@@ -50,6 +50,29 @@ def _archivo_usable(ruta):
         return False
 
 
+def _es_placeholder_api(ruta):
+    """
+    API-Football a veces responde 200 con el avatar
+    generico (silueta gris, archivo chico, pocos colores).
+    Eso no es un fallo de red, pero en un fondo oscuro
+    queda peor que el dorsal. Lo tratamos como 'sin foto'.
+    """
+    try:
+        if os.path.getsize(ruta) >= 12000:
+            return False
+
+        with Image.open(ruta) as imagen:
+            rgb = imagen.convert("RGB")
+            colores = rgb.getcolors(maxcolors=512)
+
+        # El avatar generico ronda ~80 colores por el
+        # antialiasing; una cara real tiene miles.
+        return colores is not None and len(colores) < 200
+
+    except Exception:
+        return False
+
+
 def _descargar_foto(url, ruta):
     os.makedirs(
         PLAYERS_DIR,
@@ -114,6 +137,9 @@ def obtener_foto_jugador(player_id, url):
     ruta = _ruta_foto(player_id)
 
     if _archivo_usable(ruta):
+        if _es_placeholder_api(ruta):
+            return None
+
         return ruta
 
     if os.path.exists(ruta):

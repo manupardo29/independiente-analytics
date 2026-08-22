@@ -1575,6 +1575,32 @@ def preparar_foto_circular(ruta, tamano=FOTO_TAMANO_PREP):
     return fondo
 
 
+def _ancho_texto_datos(ax, artista_texto):
+    """
+    Ancho del texto ya dibujado, en coordenadas del ax.
+
+    Evita reservar una columna fija para '51/60' cuando
+    el valor es '1' y la etiqueta queda lejos del numero.
+    """
+    try:
+        renderer = ax.figure.canvas.get_renderer()
+
+        if renderer is None:
+            ax.figure.canvas.draw()
+            renderer = ax.figure.canvas.get_renderer()
+
+        caja = artista_texto.get_window_extent(renderer=renderer)
+        caja_datos = caja.transformed(
+            ax.transData.inverted()
+        )
+
+        return caja_datos.width
+
+    except Exception:
+        texto = artista_texto.get_text()
+        return 0.032 * max(len(texto), 1)
+
+
 def _fontsize_nombre_destacado(nombre):
     largo = len(nombre or "")
 
@@ -1766,10 +1792,9 @@ def dibujar_tarjeta_destacado(ax, y, alto, destacado):
 
     stats = destacado.get("stats") or []
     y_stats = [0.02, -0.22, -0.46]
-    x_label = x_texto + 0.50
 
     for stat, y_stat in zip(stats, y_stats):
-        ax.text(
+        valor = ax.text(
             x_texto,
             y + y_stat,
             stat["value"],
@@ -1780,6 +1805,11 @@ def dibujar_tarjeta_destacado(ax, y, alto, destacado):
             color=ACCENT,
             zorder=2,
         )
+
+        x_label = x_texto + _ancho_texto_datos(
+            ax,
+            valor
+        ) + 0.055
 
         ax.text(
             x_label,
@@ -1974,6 +2004,10 @@ def crear_rendimiento_individual(
     gap = 0.16
 
     y_inicial = 4.30
+
+    # Hace falta un renderer para medir el ancho real
+    # de "1" vs "51/60" al pegar la etiqueta.
+    fig.canvas.draw()
 
     for indice, destacado in enumerate(destacados):
         y = y_inicial - indice * (alto_tarjeta + gap)
